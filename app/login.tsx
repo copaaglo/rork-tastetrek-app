@@ -21,31 +21,64 @@ function isEmailLike(v: string) {
   return /.+@.+\..+/.test(v.trim());
 }
 
+type AuthMode = "signIn" | "signUp";
+
 export default function LoginScreen() {
-  const { login } = useAuth();
+  const { signIn, signUp } = useAuth();
+  const [mode, setMode] = useState<AuthMode>("signIn");
+
   const [name, setName] = useState<string>("");
   const [email, setEmail] = useState<string>("");
+  const [password, setPassword] = useState<string>("");
+  const [passwordConfirm, setPasswordConfirm] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
+  const passwordOk = useMemo(() => {
+    return password.trim().length >= 6;
+  }, [password]);
+
   const canSubmit = useMemo(() => {
-    return name.trim().length >= 2 && isEmailLike(email);
-  }, [email, name]);
+    if (!isEmailLike(email)) return false;
+
+    if (mode === "signIn") {
+      return passwordOk;
+    }
+
+    if (name.trim().length < 2) return false;
+    if (!passwordOk) return false;
+    if (password !== passwordConfirm) return false;
+    return true;
+  }, [email, mode, name, password, passwordConfirm, passwordOk]);
 
   const onSubmit = useCallback(async () => {
     if (!canSubmit || isSubmitting) return;
 
     try {
       setIsSubmitting(true);
-      console.log("[Login] submit", { name, email });
-      await login({ name, email });
+      console.log("[Login] submit", { mode, email: email.trim() });
+
+      if (mode === "signIn") {
+        await signIn({ email, password });
+      } else {
+        await signUp({ name, email, password });
+      }
+
       router.replace("/(tabs)");
     } catch (e: unknown) {
       console.log("[Login] error", e);
-      Alert.alert("Couldn’t sign in", "Please try again.");
+
+      const msg =
+        e instanceof Error && e.message === "EMAIL_IN_USE"
+          ? "That email is already used. Try signing in instead."
+          : e instanceof Error && e.message === "INVALID_CREDENTIALS"
+            ? "Wrong email or password."
+            : "Please try again.";
+
+      Alert.alert(mode === "signIn" ? "Couldn’t sign in" : "Couldn’t sign up", msg);
     } finally {
       setIsSubmitting(false);
     }
-  }, [canSubmit, email, isSubmitting, login, name]);
+  }, [canSubmit, email, isSubmitting, mode, password, signIn, signUp, name]);
 
   return (
     <View style={styles.screen} testID="login-screen">
@@ -72,23 +105,71 @@ export default function LoginScreen() {
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Sign in</Text>
-          <Text style={styles.cardHint}>We’ll use this to personalize your picks.</Text>
+          <Text style={styles.cardTitle}>
+            {mode === "signIn" ? "Sign in" : "Create account"}
+          </Text>
+          <Text style={styles.cardHint}>
+            {mode === "signIn"
+              ? "Enter your email and password."
+              : "Create a username, email, and password."}
+          </Text>
 
-          <View style={styles.field}>
-            <Text style={styles.label}>Name</Text>
-            <TextInput
-              value={name}
-              onChangeText={setName}
-              placeholder="Amina"
-              placeholderTextColor="rgba(11,11,12,0.35)"
-              autoCapitalize="words"
-              autoCorrect={false}
-              style={styles.input}
-              testID="login-name"
-              returnKeyType="next"
-            />
+          <View style={styles.modeRow}>
+            <Pressable
+              onPress={() => setMode("signIn")}
+              style={({ pressed }) => [
+                styles.modePill,
+                mode === "signIn" ? styles.modePillActive : null,
+                pressed ? { opacity: 0.95 } : null,
+              ]}
+              testID="auth-tab-signin"
+            >
+              <Text
+                style={[
+                  styles.modePillText,
+                  mode === "signIn" ? styles.modePillTextActive : null,
+                ]}
+              >
+                Sign in
+              </Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => setMode("signUp")}
+              style={({ pressed }) => [
+                styles.modePill,
+                mode === "signUp" ? styles.modePillActive : null,
+                pressed ? { opacity: 0.95 } : null,
+              ]}
+              testID="auth-tab-signup"
+            >
+              <Text
+                style={[
+                  styles.modePillText,
+                  mode === "signUp" ? styles.modePillTextActive : null,
+                ]}
+              >
+                Sign up
+              </Text>
+            </Pressable>
           </View>
+
+          {mode === "signUp" ? (
+            <View style={styles.field}>
+              <Text style={styles.label}>Username</Text>
+              <TextInput
+                value={name}
+                onChangeText={setName}
+                placeholder="Amina"
+                placeholderTextColor="rgba(11,11,12,0.35)"
+                autoCapitalize="words"
+                autoCorrect={false}
+                style={styles.input}
+                testID="signup-name"
+                returnKeyType="next"
+              />
+            </View>
+          ) : null}
 
           <View style={styles.field}>
             <Text style={styles.label}>Email</Text>
@@ -101,11 +182,51 @@ export default function LoginScreen() {
               autoCorrect={false}
               keyboardType="email-address"
               style={styles.input}
-              testID="login-email"
-              returnKeyType="done"
-              onSubmitEditing={onSubmit}
+              testID={mode === "signIn" ? "signin-email" : "signup-email"}
+              returnKeyType="next"
             />
           </View>
+
+          <View style={styles.field}>
+            <Text style={styles.label}>Password</Text>
+            <TextInput
+              value={password}
+              onChangeText={setPassword}
+              placeholder={"••••••••"}
+              placeholderTextColor="rgba(11,11,12,0.35)"
+              autoCapitalize="none"
+              autoCorrect={false}
+              secureTextEntry={true}
+              style={styles.input}
+              testID={mode === "signIn" ? "signin-password" : "signup-password"}
+              returnKeyType={mode === "signIn" ? "done" : "next"}
+              onSubmitEditing={mode === "signIn" ? onSubmit : undefined}
+            />
+          </View>
+
+          {mode === "signUp" ? (
+            <View style={styles.field}>
+              <Text style={styles.label}>Re-enter password</Text>
+              <TextInput
+                value={passwordConfirm}
+                onChangeText={setPasswordConfirm}
+                placeholder={"••••••••"}
+                placeholderTextColor="rgba(11,11,12,0.35)"
+                autoCapitalize="none"
+                autoCorrect={false}
+                secureTextEntry={true}
+                style={styles.input}
+                testID="signup-password-confirm"
+                returnKeyType="done"
+                onSubmitEditing={onSubmit}
+              />
+              {passwordConfirm.length > 0 && password !== passwordConfirm ? (
+                <Text style={styles.inlineError} testID="signup-password-mismatch">
+                  Passwords don’t match
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
 
           <Pressable
             onPress={onSubmit}
@@ -115,15 +236,21 @@ export default function LoginScreen() {
               !canSubmit || isSubmitting ? styles.ctaDisabled : null,
               pressed ? { transform: [{ scale: 0.99 }], opacity: 0.96 } : null,
             ]}
-            testID="login-submit"
+            testID={mode === "signIn" ? "signin-submit" : "signup-submit"}
           >
             <Text style={styles.ctaText}>
-              {isSubmitting ? "Signing in…" : "Continue"}
+              {isSubmitting
+                ? mode === "signIn"
+                  ? "Signing in…"
+                  : "Creating…"
+                : mode === "signIn"
+                  ? "Sign in"
+                  : "Create account"}
             </Text>
           </Pressable>
 
           <Text style={styles.smallPrint}>
-            This is a demo login for the first version.
+            Passwords are stored locally on this device for the demo.
           </Text>
         </View>
       </KeyboardAvoidingView>
@@ -195,8 +322,41 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: Colors.light.subtext,
   },
+  modeRow: {
+    marginTop: 14,
+    flexDirection: "row",
+    backgroundColor: "rgba(0,0,0,0.05)",
+    padding: 4,
+    borderRadius: 16,
+    gap: 6,
+  },
+  modePill: {
+    flex: 1,
+    borderRadius: 14,
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+  modePillActive: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.10)",
+  },
+  modePillText: {
+    fontSize: 13,
+    fontWeight: "800" as const,
+    color: "rgba(11,11,12,0.60)",
+  },
+  modePillTextActive: {
+    color: "rgba(11,11,12,0.95)",
+  },
   field: {
     marginTop: 14,
+  },
+  inlineError: {
+    marginTop: 8,
+    fontSize: 12,
+    fontWeight: "800" as const,
+    color: "rgba(217,45,32,0.95)",
   },
   label: {
     fontSize: 12,

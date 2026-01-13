@@ -488,6 +488,15 @@ function SpotCard({ spot, variant }: { spot: FoodSpot; variant: "active" | "next
         style={StyleSheet.absoluteFillObject}
       />
 
+      <View style={styles.topInfo} pointerEvents="none" testID="spot-top-info">
+        <Text style={styles.topName} numberOfLines={1}>
+          {spot.name}
+        </Text>
+        <Text style={styles.topAddress} numberOfLines={1}>
+          {spot.address}
+        </Text>
+      </View>
+
       <View style={styles.cardBody}>
         <View style={styles.meta}>
           <Text style={styles.name} numberOfLines={1}>
@@ -797,6 +806,30 @@ const styles = StyleSheet.create({
   logoImg: {
     width: 44,
     height: 44,
+  },
+  topInfo: {
+    position: "absolute",
+    top: 14,
+    left: 14,
+    right: 78,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 16,
+    backgroundColor: "rgba(0,0,0,0.40)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
+  },
+  topName: {
+    color: "#FFFFFF",
+    fontWeight: "900" as const,
+    fontSize: 16,
+    letterSpacing: -0.2,
+  },
+  topAddress: {
+    marginTop: 2,
+    color: "rgba(255,255,255,0.90)",
+    fontWeight: "700" as const,
+    fontSize: 12,
   },
   noPhotoTag: {
     position: "absolute",
