@@ -1119,8 +1119,8 @@ const styles = StyleSheet.create({
   },
   card: {
     width: "100%",
-    height: 540,
-    borderRadius: 28,
+    height: 640,
+    borderRadius: 30,
     overflow: "hidden",
     backgroundColor: "#FFFFFF",
     shadowColor: "#000",
@@ -1131,7 +1131,7 @@ const styles = StyleSheet.create({
   },
   cardInner: {
     flex: 1,
-    padding: 20,
+    padding: 22,
     backgroundColor: "#FFFFFF",
   },
   cardNext: {
@@ -1146,8 +1146,8 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   logoWrap: {
-    width: 72,
-    height: 72,
+    width: 78,
+    height: 78,
     borderRadius: 22,
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
@@ -1157,8 +1157,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   logo: {
-    width: 56,
-    height: 56,
+    width: 60,
+    height: 60,
   },
   logoFallback: {
     width: "100%",
@@ -1212,14 +1212,14 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
   },
   photoBox: {
-    marginTop: 16,
+    marginTop: 18,
     width: "100%",
-    borderRadius: 22,
+    borderRadius: 24,
     overflow: "hidden",
     backgroundColor: "rgba(0,0,0,0.04)",
     borderWidth: 1,
     borderColor: "rgba(0,0,0,0.08)",
-    height: 260,
+    height: 330,
   },
   photo: {
     width: "100%",
@@ -1251,7 +1251,7 @@ const styles = StyleSheet.create({
   name: {
     color: "#000000",
     fontWeight: "900" as const,
-    fontSize: 30,
+    fontSize: 32,
     letterSpacing: -0.4,
   },
   ratingRow: {
