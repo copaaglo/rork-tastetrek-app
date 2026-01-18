@@ -18,6 +18,7 @@ import {
 } from "react-native";
 
 import Colors from "@/constants/colors";
+import { BRAND } from "@/constants/branding";
 import { usePreferences } from "@/providers/preferences";
 import { fetchNearbyPlaces } from "@/utils/places";
 import type { Place } from "@/utils/places/types";
@@ -448,6 +449,22 @@ export default function DiscoverScreen() {
       <Stack.Screen
         options={{
           title: "TasteTrek",
+          headerTitle: () => (
+            <View style={styles.headerTitle} testID="header-title">
+              <Image
+                source={{
+                  uri: BRAND.logoUrl,
+                }}
+                style={styles.headerLogo}
+                contentFit="contain"
+                transition={150}
+                testID="header-logo"
+              />
+              <Text style={styles.headerTitleText} testID="header-title-text">
+                {BRAND.appName}
+              </Text>
+            </View>
+          ),
           headerTitleStyle: {
             fontWeight: "800" as const,
             letterSpacing: -0.3,
@@ -799,6 +816,21 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.light.background,
     paddingHorizontal: 16,
     paddingTop: 12,
+  },
+  headerTitle: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  headerLogo: {
+    width: 22,
+    height: 22,
+  },
+  headerTitleText: {
+    fontWeight: "900" as const,
+    letterSpacing: -0.3,
+    color: Colors.light.text,
+    fontSize: 16,
   },
   topRow: {
     flexDirection: "row",

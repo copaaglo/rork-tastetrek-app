@@ -2,7 +2,7 @@ import React, { useCallback, useMemo, useState } from "react";
 
 import { LinearGradient } from "expo-linear-gradient";
 import { router, Stack } from "expo-router";
-import { ShieldCheck } from "lucide-react-native";
+import { Image } from "expo-image";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -15,6 +15,7 @@ import {
 } from "react-native";
 
 import Colors from "@/constants/colors";
+import { BRAND } from "@/constants/branding";
 import { useAuth } from "@/providers/auth";
 
 function isEmailLike(v: string) {
@@ -94,10 +95,16 @@ export default function LoginScreen() {
         style={styles.content}
       >
         <View style={styles.brand}>
-          <View style={styles.brandMark}>
-            <ShieldCheck color={"#FFFFFF"} size={20} />
+          <View style={styles.brandMark} testID="brand-logo">
+            <Image
+              source={{ uri: BRAND.logoUrl }}
+              style={styles.brandLogoImg}
+              contentFit="contain"
+              transition={150}
+              testID="brand-logo-img"
+            />
           </View>
-          <Text style={styles.brandTitle}>TasteTrek</Text>
+          <Text style={styles.brandTitle}>{BRAND.appName}</Text>
           <Text style={styles.brandSubtitle}>
             Swipe through nearby food spots, save your vibe, and get directions in
             one tap.
@@ -284,6 +291,10 @@ const styles = StyleSheet.create({
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 8 },
     elevation: 3,
+  },
+  brandLogoImg: {
+    width: 28,
+    height: 28,
   },
   brandTitle: {
     marginTop: 14,
