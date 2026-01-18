@@ -39,8 +39,8 @@ const DEFAULT_PREFS: Preferences = {
   priceMin: 1,
   priceMax: 4,
   halalOnly: false,
-  maxDistanceKm: 5,
-  minRating: 4,
+  maxDistanceKm: 20,
+  minRating: null,
   includedCategories: [],
   excludedSpotIds: [],
 };
