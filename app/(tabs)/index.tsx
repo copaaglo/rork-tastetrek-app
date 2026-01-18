@@ -34,6 +34,7 @@ export type FoodSpot = {
   distanceKm: number;
   photoUrl: string | null;
   logoUrl: string | null;
+  logoFallbackUrl: string | null;
   fallbackImageUrl: string;
   address: string;
   location: { lat: number; lng: number };
@@ -110,10 +111,21 @@ function guessBrandDomain(name: string): string | null {
   return `${first}.com`;
 }
 
-function getBrandLogoUrl(name: string): string | null {
-  const domain = guessBrandDomain(name);
-  if (!domain) return null;
+function makeClearbitLogoUrl(domain: string): string {
   return `https://logo.clearbit.com/${encodeURIComponent(domain)}?size=256`;
+}
+
+function makeFaviconUrl(domain: string): string {
+  return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=256`;
+}
+
+function getBrandLogoCandidates(name: string): { primary: string | null; fallback: string | null } {
+  const domain = guessBrandDomain(name);
+  if (!domain) return { primary: null, fallback: null };
+  return {
+    primary: makeClearbitLogoUrl(domain),
+    fallback: makeFaviconUrl(domain),
+  };
 }
 
 function makeFallbackLogoPlaceholder(name: string): string {
@@ -142,7 +154,9 @@ function spotFromPlace(p: Place): FoodSpot {
   const address = p.address;
 
   const photoUrl = p.photoUrl ?? null;
-  const logoUrl = getBrandLogoUrl(p.name);
+  const logoCandidates = getBrandLogoCandidates(p.name);
+  const logoUrl = logoCandidates.primary;
+  const logoFallbackUrl = logoCandidates.fallback;
   const fallbackImageUrl = makeFallbackLogoPlaceholder(p.name);
 
   const etaMins = Math.max(6, Math.round(p.distanceKm * 7));
@@ -158,6 +172,7 @@ function spotFromPlace(p: Place): FoodSpot {
     distanceKm: p.distanceKm,
     photoUrl,
     logoUrl,
+    logoFallbackUrl,
     fallbackImageUrl,
     address,
     location: p.location,
@@ -574,7 +589,9 @@ function EmptyState() {
 
 function SpotCard({ spot, variant }: { spot: FoodSpot; variant: "active" | "next" }) {
   const overlayOpacity = variant === "active" ? 0.38 : 0.24;
+
   const primaryImageUri = spot.logoUrl ?? spot.photoUrl;
+  const secondaryImageUri = spot.logoFallbackUrl ?? (spot.logoUrl ? spot.photoUrl : null);
   const isLogoPrimary = Boolean(spot.logoUrl);
 
   return (
@@ -606,7 +623,7 @@ function SpotCard({ spot, variant }: { spot: FoodSpot; variant: "active" | "next
             <Text style={styles.ratingStars}>
               {"★".repeat(Math.max(0, Math.min(5, Math.round(spot.rating))))}
             </Text>
-            <Text style={styles.ratingText}>{spot.rating.toFixed(1)}</Text>
+            <Text style={styles.ratingText}>{`${spot.rating.toFixed(1)}/5`}</Text>
             <Text style={styles.ratingDot}>·</Text>
             <Text style={styles.cuisine} numberOfLines={1}>
               {spot.cuisine}
@@ -654,6 +671,7 @@ function SpotCard({ spot, variant }: { spot: FoodSpot; variant: "active" | "next
           <ImageFill
             key={spot.id}
             primaryUri={primaryImageUri}
+            secondaryUri={secondaryImageUri}
             fallbackUri={spot.fallbackImageUrl}
             lastResortUri={makeLastResortPlaceholder(spot.name)}
             contentFit={isLogoPrimary ? "contain" : "cover"}
@@ -684,35 +702,46 @@ function SpotCard({ spot, variant }: { spot: FoodSpot; variant: "active" | "next
 
 function ImageFill({
   primaryUri,
+  secondaryUri,
   fallbackUri,
   lastResortUri,
   contentFit,
 }: {
   primaryUri: string | null;
+  secondaryUri: string | null;
   fallbackUri: string;
   lastResortUri: string;
   contentFit: "cover" | "contain";
 }) {
-  const [activeUri, setActiveUri] = useState<string>(primaryUri ?? fallbackUri);
+  const [activeUri, setActiveUri] = useState<string>(primaryUri ?? secondaryUri ?? fallbackUri);
+  const [didSecondary, setDidSecondary] = useState<boolean>(false);
   const [didFallback, setDidFallback] = useState<boolean>(false);
   const [didLastResort, setDidLastResort] = useState<boolean>(false);
 
   useEffect(() => {
-    const next = primaryUri ?? fallbackUri;
+    const next = primaryUri ?? secondaryUri ?? fallbackUri;
     setActiveUri(next);
+    setDidSecondary(false);
     setDidFallback(false);
     setDidLastResort(false);
-  }, [fallbackUri, primaryUri]);
+  }, [fallbackUri, primaryUri, secondaryUri]);
 
   const onError = useCallback(
     (e: unknown) => {
       console.log("[SpotImage] load error", {
         activeUri,
         primaryUri,
+        secondaryUri,
         fallbackUri,
         lastResortUri,
         e,
       });
+
+      if (!didSecondary && secondaryUri) {
+        setDidSecondary(true);
+        setActiveUri(secondaryUri);
+        return;
+      }
 
       if (!didFallback) {
         setDidFallback(true);
@@ -725,12 +754,21 @@ function ImageFill({
         setActiveUri(lastResortUri);
       }
     },
-    [activeUri, didFallback, didLastResort, fallbackUri, lastResortUri, primaryUri]
+    [
+      activeUri,
+      didFallback,
+      didLastResort,
+      didSecondary,
+      fallbackUri,
+      lastResortUri,
+      primaryUri,
+      secondaryUri,
+    ]
   );
 
   const onLoad = useCallback(() => {
-    console.log("[SpotImage] loaded", { activeUri, didFallback, didLastResort });
-  }, [activeUri, didFallback, didLastResort]);
+    console.log("[SpotImage] loaded", { activeUri, didSecondary, didFallback, didLastResort });
+  }, [activeUri, didFallback, didLastResort, didSecondary]);
 
   return (
     <Image
