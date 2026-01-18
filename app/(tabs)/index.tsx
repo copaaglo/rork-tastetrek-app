@@ -16,6 +16,8 @@ import {
   View,
 } from "react-native";
 
+import { Star } from "lucide-react-native";
+
 import Colors from "@/constants/colors";
 import { usePreferences } from "@/providers/preferences";
 import { fetchNearbyPlaces } from "@/utils/places";
@@ -298,10 +300,6 @@ function spotFromPlace(p: Place): FoodSpot {
     address,
     location: p.location,
   };
-}
-
-function priceLabel(tier: 1 | 2 | 3 | 4) {
-  return "$".repeat(tier);
 }
 
 export default function DiscoverScreen() {
@@ -737,10 +735,16 @@ function SpotCard({ spot, variant }: { spot: FoodSpot; variant: "active" | "next
   });
 
   const resolvedLogoUri =
-    googleLogo?.primaryLogoUri ?? spot.logoUrl ?? spot.logoFallbackUrl ?? googleLogo?.fallbackLogoUri;
+    googleLogo?.primaryLogoUri ??
+    spot.logoUrl ??
+    googleLogo?.fallbackLogoUri ??
+    spot.logoFallbackUrl ??
+    null;
 
-  const rounded = Math.max(0, Math.min(5, Math.round(spot.rating)));
-  const stars = `${"★".repeat(rounded)}${"☆".repeat(5 - rounded)}`;
+  const cuisineLabel = useMemo(() => {
+    const raw = spot.cuisine ?? "";
+    return raw.split("·")[0]?.trim() || "Restaurant";
+  }, [spot.cuisine]);
 
   return (
     <View style={[styles.card, variant === "next" ? styles.cardNext : null]} testID="spot-card">
@@ -771,61 +775,76 @@ function SpotCard({ spot, variant }: { spot: FoodSpot; variant: "active" | "next
             )}
           </View>
 
-          <View style={styles.headerText}>
+          <View style={styles.headerText} testID="spot-header-text">
             <Text style={styles.name} numberOfLines={1} testID="spot-name">
               {spot.name}
             </Text>
-            <Text style={styles.address} numberOfLines={1} testID="spot-address">
-              {spot.address}
+            <Text style={styles.cuisine} numberOfLines={1} testID="spot-cuisine">
+              {cuisineLabel}
             </Text>
           </View>
         </View>
 
+        <View style={styles.divider} testID="spot-divider" />
+
         <View style={styles.ratingRow} testID="spot-rating-row">
-          <Text style={styles.ratingStars} testID="spot-rating-stars">
-            {stars}
+          <StarRating rating={spot.rating} size={24} testID="spot-stars" />
+          <Text style={styles.ratingNumber} testID="spot-rating-number">
+            {spot.rating.toFixed(1)}
           </Text>
-          <Text style={styles.ratingText} testID="spot-rating-text">{`${spot.rating.toFixed(
-            1
-          )}/5`}</Text>
-        </View>
-
-        <View style={styles.pills}>
-          <Pill text={`${priceLabel(spot.priceTier)} · ${spot.etaMins} min`} />
-          <Pill text={`${spot.distanceKm} km`} />
-          {spot.halal ? <Pill text="Halal" tone="accent" /> : null}
-        </View>
-
-        <View style={styles.bigLogoStage} pointerEvents="none" testID="spot-big-logo-stage">
-          {resolvedLogoUri ? (
-            <Image
-              source={{ uri: resolvedLogoUri }}
-              style={styles.bigLogo}
-              contentFit="contain"
-              transition={150}
-              testID="spot-big-logo"
-            />
-          ) : null}
         </View>
       </View>
     </View>
   );
 }
 
-function Pill({ text, tone }: { text: string; tone?: "accent" }) {
+function StarRating({
+  rating,
+  size,
+  testID,
+}: {
+  rating: number;
+  size: number;
+  testID: string;
+}) {
+  const clamped = Math.max(0, Math.min(5, rating));
+  const full = Math.floor(clamped);
+  const frac = clamped - full;
+  const hasHalf = frac >= 0.25 && frac < 0.75;
+  const filledCount = full + (frac >= 0.75 ? 1 : 0);
+
+  const stars = Array.from({ length: 5 }).map((_, i) => {
+    const idx = i + 1;
+    const isFilled = idx <= filledCount;
+    const isHalf = !isFilled && hasHalf && idx === full + 1;
+
+    return (
+      <View key={`star-${i}`} style={styles.starCell} testID={`${testID}-cell-${i}`}>
+        <StarIcon filled={false} size={size} />
+        {isFilled ? (
+          <View style={StyleSheet.absoluteFill}>
+            <StarIcon filled size={size} />
+          </View>
+        ) : isHalf ? (
+          <View style={[StyleSheet.absoluteFill, { overflow: "hidden", width: size / 2 }]}>
+            <StarIcon filled size={size} />
+          </View>
+        ) : null}
+      </View>
+    );
+  });
+
   return (
-    <View
-      style={[styles.pill, tone === "accent" ? styles.pillAccent : null]}
-      testID={`pill-${text}`}
-    >
-      <Text
-        style={[styles.pillText, tone === "accent" ? styles.pillTextAccent : null]}
-        numberOfLines={1}
-      >
-        {text}
-      </Text>
+    <View style={styles.starsRow} testID={testID}>
+      {stars}
     </View>
   );
+}
+
+function StarIcon({ filled, size }: { filled: boolean; size: number }) {
+  const fill = filled ? "#F5B301" : "transparent";
+  const stroke = filled ? "#F5B301" : "rgba(0,0,0,0.22)";
+  return <Star size={size} color={stroke} fill={fill} />;
 }
 
 function ActionButton({
@@ -914,16 +933,19 @@ const styles = StyleSheet.create({
   },
   card: {
     width: "100%",
-    height: 520,
-    borderRadius: 26,
+    height: 260,
+    borderRadius: 28,
     overflow: "hidden",
     backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "rgba(0,0,0,0.08)",
+    shadowColor: "#000",
+    shadowOpacity: 0.16,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 8,
   },
   cardInner: {
     flex: 1,
-    padding: 18,
+    padding: 20,
     backgroundColor: "#FFFFFF",
   },
   cardNext: {
@@ -938,19 +960,19 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   logoWrap: {
-    width: 56,
-    height: 56,
-    borderRadius: 18,
+    width: 72,
+    height: 72,
+    borderRadius: 22,
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "rgba(0,0,0,0.10)",
+    borderColor: "rgba(0,0,0,0.08)",
     overflow: "hidden",
     justifyContent: "center",
     alignItems: "center",
   },
   logo: {
-    width: 44,
-    height: 44,
+    width: 56,
+    height: 56,
   },
   logoFallback: {
     width: "100%",
@@ -968,20 +990,33 @@ const styles = StyleSheet.create({
   headerText: {
     flex: 1,
     minWidth: 0,
+    gap: 6,
   },
-  bigLogoStage: {
-    flex: 1,
+  divider: {
     marginTop: 18,
-    borderRadius: 22,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "rgba(0,0,0,0.06)",
-    justifyContent: "center",
-    alignItems: "center",
+    height: 1,
+    backgroundColor: "rgba(0,0,0,0.08)",
   },
-  bigLogo: {
-    width: "76%",
-    height: "76%",
+  cuisine: {
+    fontSize: 16,
+    fontWeight: "800" as const,
+    color: "rgba(0,0,0,0.45)",
+  },
+  starsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  starCell: {
+    width: 24,
+    height: 24,
+  },
+  ratingNumber: {
+    marginLeft: 10,
+    fontSize: 28,
+    fontWeight: "900" as const,
+    color: "rgba(0,0,0,0.45)",
+    letterSpacing: -0.2,
   },
   stamp: {
     position: "absolute",
@@ -1007,33 +1042,16 @@ const styles = StyleSheet.create({
     letterSpacing: 1.2,
   },
   name: {
-    color: "#0B0B0C",
+    color: "#000000",
     fontWeight: "900" as const,
-    fontSize: 20,
-    letterSpacing: -0.2,
+    fontSize: 30,
+    letterSpacing: -0.4,
   },
   ratingRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    marginTop: 12,
-  },
-  ratingStars: {
-    color: "#0B0B0C",
-    fontWeight: "900" as const,
-    fontSize: 14,
-    letterSpacing: 1.2,
-  },
-  ratingText: {
-    color: "rgba(0,0,0,0.70)",
-    fontWeight: "800" as const,
-    fontSize: 13,
-  },
-  pills: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    marginTop: 12,
+    justifyContent: "space-between",
+    marginTop: 18,
   },
   pill: {
     backgroundColor: "rgba(0,0,0,0.04)",
