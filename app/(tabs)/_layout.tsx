@@ -3,7 +3,7 @@ import React from "react";
 import { Image } from "expo-image";
 import { Tabs } from "expo-router";
 import { Compass, SlidersHorizontal } from "lucide-react-native";
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 
 import Colors from "@/constants/colors";
 import { BRAND } from "@/constants/branding";
@@ -15,9 +15,13 @@ export default function TabLayout() {
         tabBarActiveTintColor: Colors.light.tint,
         tabBarInactiveTintColor: Colors.light.tabIconDefault,
         headerShown: true,
-        headerTitleAlign: "center",
-        headerTitle: () => (
-          <View style={styles.headerTitle} testID="tabs-header-title">
+        headerTitle: "",
+        headerShadowVisible: false,
+        headerStyle: {
+          backgroundColor: "#FFFFFF",
+        },
+        headerLeft: () => (
+          <View style={styles.headerLeft} testID="tabs-header-left">
             <Image
               source={{ uri: BRAND.logoUrl }}
               style={styles.headerLogo}
@@ -25,9 +29,6 @@ export default function TabLayout() {
               transition={150}
               testID="tabs-header-logo"
             />
-            <Text style={styles.headerText} testID="tabs-header-text">
-              {BRAND.appName}
-            </Text>
           </View>
         ),
         tabBarStyle: {
@@ -57,19 +58,20 @@ export default function TabLayout() {
 }
 
 const styles = StyleSheet.create({
-  headerTitle: {
-    flexDirection: "row",
+  headerLeft: {
+    marginLeft: 8,
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    backgroundColor: "rgba(0,0,0,0.04)",
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.06)",
+    justifyContent: "center",
     alignItems: "center",
-    gap: 8,
   },
   headerLogo: {
     width: 22,
     height: 22,
   },
-  headerText: {
-    fontSize: 16,
-    fontWeight: "900" as const,
-    letterSpacing: -0.3,
-    color: Colors.light.text,
-  },
+
 });

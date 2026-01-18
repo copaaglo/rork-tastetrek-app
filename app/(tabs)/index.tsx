@@ -18,7 +18,6 @@ import {
 } from "react-native";
 
 import Colors from "@/constants/colors";
-import { BRAND } from "@/constants/branding";
 import { usePreferences } from "@/providers/preferences";
 import { fetchNearbyPlaces } from "@/utils/places";
 import type { Place } from "@/utils/places/types";
@@ -448,40 +447,15 @@ export default function DiscoverScreen() {
     <View style={styles.screen} testID="discover-screen">
       <Stack.Screen
         options={{
-          title: "TasteTrek",
-          headerTitle: () => (
-            <View style={styles.headerTitle} testID="header-title">
-              <Image
-                source={{
-                  uri: BRAND.logoUrl,
-                }}
-                style={styles.headerLogo}
-                contentFit="contain"
-                transition={150}
-                testID="header-logo"
-              />
-              <Text style={styles.headerTitleText} testID="header-title-text">
-                {BRAND.appName}
-              </Text>
-            </View>
-          ),
-          headerTitleStyle: {
-            fontWeight: "800" as const,
-            letterSpacing: -0.3,
+          headerTitle: "",
+          headerShadowVisible: false,
+          headerStyle: {
+            backgroundColor: "#FFFFFF",
           },
         }}
       />
 
       <View style={styles.topRow} testID="discover-top-row">
-        <View style={styles.topLeftBrand} testID="discover-top-left-brand">
-          <Image
-            source={{ uri: BRAND.logoUrl }}
-            style={styles.topLeftLogo}
-            contentFit="contain"
-            transition={150}
-            testID="discover-top-left-logo"
-          />
-        </View>
         <Text style={styles.subtitle} numberOfLines={1} testID="discover-subtitle">
           {headerSubtitle}
         </Text>
@@ -823,46 +797,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 10,
   },
-  headerTitle: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  headerLogo: {
-    width: 22,
-    height: 22,
-  },
-  headerTitleText: {
-    fontWeight: "900" as const,
-    letterSpacing: -0.3,
-    color: Colors.light.text,
-    fontSize: 16,
-  },
+
   topRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    gap: 10,
+    justifyContent: "flex-end",
     paddingBottom: 10,
-  },
-  topLeftBrand: {
-    width: 34,
-    height: 34,
-    borderRadius: 12,
-    backgroundColor: "rgba(255,255,255,0.92)",
-    borderWidth: 1,
-    borderColor: "rgba(0,0,0,0.08)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  topLeftLogo: {
-    width: 22,
-    height: 22,
   },
   subtitle: {
     color: "rgba(0,0,0,0.55)",
     fontSize: 12,
-    maxWidth: "72%",
     textAlign: "right",
     fontWeight: "700" as const,
   },
