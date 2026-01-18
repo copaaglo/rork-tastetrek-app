@@ -473,10 +473,16 @@ export default function DiscoverScreen() {
       />
 
       <View style={styles.topRow} testID="discover-top-row">
-        <View style={styles.badge}>
-          <Text style={styles.badgeText}>Nearby picks</Text>
+        <View style={styles.topLeftBrand} testID="discover-top-left-brand">
+          <Image
+            source={{ uri: BRAND.logoUrl }}
+            style={styles.topLeftLogo}
+            contentFit="contain"
+            transition={150}
+            testID="discover-top-left-logo"
+          />
         </View>
-        <Text style={styles.subtitle} numberOfLines={1}>
+        <Text style={styles.subtitle} numberOfLines={1} testID="discover-subtitle">
           {headerSubtitle}
         </Text>
       </View>
@@ -813,9 +819,9 @@ function ActionButton({
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: Colors.light.background,
+    backgroundColor: "#FFFFFF",
     paddingHorizontal: 16,
-    paddingTop: 12,
+    paddingTop: 10,
   },
   headerTitle: {
     flexDirection: "row",
@@ -839,25 +845,26 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingBottom: 10,
   },
-  badge: {
-    backgroundColor: "rgba(255,77,46,0.12)",
+  topLeftBrand: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.92)",
     borderWidth: 1,
-    borderColor: "rgba(255,77,46,0.22)",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
+    borderColor: "rgba(0,0,0,0.08)",
+    justifyContent: "center",
+    alignItems: "center",
   },
-  badgeText: {
-    color: Colors.light.chipText,
-    fontWeight: "700" as const,
-    fontSize: 12,
-    letterSpacing: 0.2,
+  topLeftLogo: {
+    width: 22,
+    height: 22,
   },
   subtitle: {
-    color: Colors.light.subtext,
+    color: "rgba(0,0,0,0.55)",
     fontSize: 12,
-    maxWidth: "62%",
+    maxWidth: "72%",
     textAlign: "right",
+    fontWeight: "700" as const,
   },
   deck: {
     flex: 1,
