@@ -2,7 +2,7 @@ import React, { useCallback, useMemo } from "react";
 
 import { Stack } from "expo-router";
 import { Check, CircleDollarSign, LogOut, MapPin, SlidersHorizontal, Star } from "lucide-react-native";
-import { Alert, Pressable, StyleSheet, Switch, Text, View } from "react-native";
+import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 
 import Colors from "@/constants/colors";
 import { type FoodCategory, usePreferences } from "@/providers/preferences";
@@ -98,7 +98,12 @@ export default function FiltersScreen() {
   }, [logout]);
 
   return (
-    <View style={styles.screen} testID="filters-screen">
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={styles.screenContent}
+      showsVerticalScrollIndicator={false}
+      testID="filters-screen"
+    >
       <Stack.Screen
         options={{
           title: "Filters",
@@ -245,7 +250,7 @@ export default function FiltersScreen() {
         </Pressable>
       </View>
 
-      <View style={styles.accountCard}>
+      <View style={styles.accountCard} testID="account-card">
         <Text style={styles.accountTitle}>Signed in as</Text>
         <Text style={styles.accountName} numberOfLines={1}>
           {user?.name ?? "Explorer"}
@@ -266,7 +271,7 @@ export default function FiltersScreen() {
           <Text style={styles.logoutText}>Log out</Text>
         </Pressable>
       </View>
-    </View>
+    </ScrollView>
   );
 }
 
@@ -290,7 +295,10 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.light.background,
     paddingHorizontal: 16,
+  },
+  screenContent: {
     paddingTop: 12,
+    paddingBottom: 28,
   },
   hero: {
     flexDirection: "row",
