@@ -59,19 +59,17 @@ export default function TabLayout() {
 
 const styles = StyleSheet.create({
   headerLeft: {
-    marginLeft: 8,
-    width: 34,
-    height: 34,
+    marginLeft: 10,
+    width: 40,
+    height: 40,
     borderRadius: 12,
-    backgroundColor: "rgba(0,0,0,0.04)",
-    borderWidth: 1,
-    borderColor: "rgba(0,0,0,0.06)",
+    backgroundColor: "transparent",
     justifyContent: "center",
     alignItems: "center",
   },
   headerLogo: {
-    width: 22,
-    height: 22,
+    width: 34,
+    height: 34,
   },
 
 });
