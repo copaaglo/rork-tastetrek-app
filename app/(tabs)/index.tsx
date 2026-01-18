@@ -7,6 +7,7 @@ import { Image } from "expo-image";
 import * as Linking from "expo-linking";
 import { Stack } from "expo-router";
 import {
+  Alert,
   Animated,
   PanResponder,
   Platform,
@@ -183,10 +184,18 @@ export default function DiscoverScreen() {
     useUserLocation();
   const { prefs } = usePreferences();
 
+  const [isPullRefreshing, setIsPullRefreshing] = useState<boolean>(false);
+
   const seedLat = coords?.latitude ?? 37.7749;
   const seedLng = coords?.longitude ?? -122.4194;
 
-  const placesQuery = useQuery({
+  const {
+    data: placesData,
+    error: placesError,
+    isFetching: isPlacesFetching,
+    isLoading: isPlacesLoading,
+    refetch: refetchPlaces,
+  } = useQuery({
     queryKey: [
       "nearbyPlaces",
       Math.round(seedLat * 1000) / 1000,
@@ -206,11 +215,11 @@ export default function DiscoverScreen() {
   });
 
   const allSpots = useMemo<FoodSpot[]>(() => {
-    const places = placesQuery.data ?? [];
+    const places = placesData ?? [];
     const mapped = places.map(spotFromPlace);
     console.log("[Discover] mapped spots", { places: places.length, spots: mapped.length });
     return mapped;
-  }, [placesQuery.data]);
+  }, [placesData]);
 
   const filteredSpots = useMemo(() => {
     const res = allSpots.filter((s) => {
@@ -252,14 +261,24 @@ export default function DiscoverScreen() {
   const pos = useRef<Animated.ValueXY>(new Animated.ValueXY()).current;
   const swipeX = useRef<Animated.Value>(new Animated.Value(0)).current;
 
+  const pullDistance = useRef<Animated.Value>(new Animated.Value(0)).current;
+
   const resetCard = useCallback(() => {
-    Animated.spring(pos, {
-      toValue: { x: 0, y: 0 },
-      useNativeDriver: false,
-      bounciness: 10,
-      speed: 14,
-    }).start();
-  }, [pos]);
+    Animated.parallel([
+      Animated.spring(pos, {
+        toValue: { x: 0, y: 0 },
+        useNativeDriver: false,
+        bounciness: 10,
+        speed: 14,
+      }),
+      Animated.spring(pullDistance, {
+        toValue: 0,
+        useNativeDriver: false,
+        bounciness: 10,
+        speed: 16,
+      }),
+    ]).start();
+  }, [pos, pullDistance]);
 
   const goNext = useCallback(() => {
     setIndex((prev) => {
@@ -268,7 +287,8 @@ export default function DiscoverScreen() {
       return nextIndex;
     });
     pos.setValue({ x: 0, y: 0 });
-  }, [pos]);
+    pullDistance.setValue(0);
+  }, [pos, pullDistance]);
 
   const forceSwipe = useCallback(
     (dir: "left" | "right") => {
@@ -290,6 +310,39 @@ export default function DiscoverScreen() {
     [current, goNext, pos]
   );
 
+  const refreshAlgorithm = useCallback(async () => {
+    if (isPullRefreshing) return;
+
+    console.log("[Discover] pull-to-refresh start", {
+      coords,
+      prefs,
+      currentIndex: index,
+    });
+
+    try {
+      setIsPullRefreshing(true);
+      setIndex(0);
+      pos.setValue({ x: 0, y: 0 });
+      pullDistance.setValue(0);
+
+      const res = await refetchPlaces();
+      console.log("[Discover] pull-to-refresh done", {
+        status: res.status,
+        dataLen: res.data?.length ?? 0,
+      });
+
+      if (res.error) {
+        Alert.alert("Refresh failed", "Couldn’t refresh places. Try again in a moment.");
+      }
+    } catch (e: unknown) {
+      console.log("[Discover] pull-to-refresh error", e);
+      Alert.alert("Refresh failed", "Couldn’t refresh places. Try again in a moment.");
+    } finally {
+      setIsPullRefreshing(false);
+      resetCard();
+    }
+  }, [coords, index, isPullRefreshing, pos, prefs, pullDistance, refetchPlaces, resetCard]);
+
   const panResponder = useMemo(() => {
     return PanResponder.create({
       onMoveShouldSetPanResponder: (_evt, gesture) => {
@@ -303,11 +356,30 @@ export default function DiscoverScreen() {
         pos.setValue({ x: 0, y: 0 });
       },
       onPanResponderMove: (_evt, gesture) => {
+        const isPullDown = gesture.dy > 0 && Math.abs(gesture.dx) < 22;
+
+        if (isPullDown) {
+          const y = Math.min(110, gesture.dy * 0.55);
+          pos.setValue({ x: 0, y });
+          swipeX.setValue(0);
+          pullDistance.setValue(y);
+          return;
+        }
+
         pos.setValue({ x: gesture.dx, y: gesture.dy });
         swipeX.setValue(gesture.dx);
+        pullDistance.setValue(0);
       },
       onPanResponderRelease: (_evt, gesture) => {
         pos.flattenOffset();
+
+        const isPullDownRelease = gesture.dy > 90 && Math.abs(gesture.dx) < 26;
+        if (isPullDownRelease) {
+          refreshAlgorithm().catch((e: unknown) => {
+            console.log("[Discover] refreshAlgorithm unhandled error", e);
+          });
+          return;
+        }
 
         if (gesture.dx > SWIPE_THRESHOLD) {
           forceSwipe("right");
@@ -322,7 +394,13 @@ export default function DiscoverScreen() {
         resetCard();
       },
     });
-  }, [forceSwipe, pos, resetCard, swipeX]);
+  }, [forceSwipe, pos, pullDistance, refreshAlgorithm, resetCard, swipeX]);
+
+  useEffect(() => {
+    setIndex(0);
+    pos.setValue({ x: 0, y: 0 });
+    pullDistance.setValue(0);
+  }, [filteredSpots.length, pos, prefs, pullDistance]);
 
   const likeOpacity = swipeX.interpolate({
     inputRange: [0, 90, 160],
@@ -387,9 +465,39 @@ export default function DiscoverScreen() {
       </View>
 
       <View style={styles.deck} testID="discover-deck">
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.pullIndicator,
+            {
+              opacity: pullDistance.interpolate({
+                inputRange: [0, 16, 70],
+                outputRange: [0, 0.55, 1],
+                extrapolate: "clamp",
+              }),
+              transform: [
+                {
+                  translateY: pullDistance.interpolate({
+                    inputRange: [0, 110],
+                    outputRange: [-22, 6],
+                    extrapolate: "clamp",
+                  }),
+                },
+              ],
+            },
+          ]}
+          testID="discover-pull-indicator"
+        >
+          <View style={styles.pullPill}>
+            <Text style={styles.pullText}>
+              {isPullRefreshing || isPlacesFetching ? "Refreshing…" : "Pull to refresh"}
+            </Text>
+          </View>
+        </Animated.View>
+
         {next ? <SpotCard spot={next} variant="next" /> : null}
 
-        {isLocLoading || placesQuery.isLoading ? (
+        {isLocLoading || isPlacesLoading ? (
           <View style={styles.empty} testID="discover-loading">
             <Text style={styles.emptyTitle}>Finding fast food near you…</Text>
             <Text style={styles.emptyText}>Pulling real places from OSM (and more).</Text>
@@ -399,7 +507,7 @@ export default function DiscoverScreen() {
             <Text style={styles.emptyTitle}>Location needed</Text>
             <Text style={styles.emptyText}>{locationError}</Text>
           </View>
-        ) : placesQuery.error ? (
+        ) : placesError ? (
           <View style={styles.empty} testID="discover-places-error">
             <Text style={styles.emptyTitle}>Couldn’t load places</Text>
             <Text style={styles.emptyText}>
@@ -724,6 +832,28 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     paddingBottom: 12,
+  },
+  pullIndicator: {
+    position: "absolute",
+    top: 6,
+    left: 0,
+    right: 0,
+    alignItems: "center",
+    zIndex: 10,
+  },
+  pullPill: {
+    backgroundColor: "rgba(255,255,255,0.92)",
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.10)",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  pullText: {
+    color: "rgba(0,0,0,0.72)",
+    fontWeight: "800" as const,
+    fontSize: 12,
+    letterSpacing: 0.1,
   },
   activeCard: {
     width: "100%",
