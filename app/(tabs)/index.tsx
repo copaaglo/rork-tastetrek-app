@@ -424,6 +424,12 @@ export default function DiscoverScreen() {
   const seedLat = coords?.latitude ?? 37.7749;
   const seedLng = coords?.longitude ?? -122.4194;
 
+  const radiusMeters = useMemo(() => {
+    const km = prefs.maxDistanceKm ?? 20;
+    const meters = Math.round(km * 1000);
+    return Math.max(2500, Math.min(40000, meters));
+  }, [prefs.maxDistanceKm]);
+
   const {
     data: placesData,
     error: placesError,
@@ -435,13 +441,14 @@ export default function DiscoverScreen() {
       "nearbyPlaces",
       Math.round(seedLat * 1000) / 1000,
       Math.round(seedLng * 1000) / 1000,
+      radiusMeters,
     ],
     queryFn: async ({ signal }) => {
-      console.log("[Discover] fetching nearby places", { seedLat, seedLng });
+      console.log("[Discover] fetching nearby places", { seedLat, seedLng, radiusMeters });
       return fetchNearbyPlaces({
         center: { lat: seedLat, lng: seedLng },
-        radiusMeters: 2500,
-        limit: 30,
+        radiusMeters,
+        limit: 40,
         signal,
       });
     },
