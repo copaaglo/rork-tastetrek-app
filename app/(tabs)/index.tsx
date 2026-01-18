@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { useQuery } from "@tanstack/react-query";
 
-import { LinearGradient } from "expo-linear-gradient";
 import { Image } from "expo-image";
 import * as Linking from "expo-linking";
 import { Stack } from "expo-router";
@@ -38,6 +37,11 @@ export type FoodSpot = {
   fallbackImageUrl: string;
   address: string;
   location: { lat: number; lng: number };
+};
+
+type GoogleLogoResult = {
+  primaryLogoUri: string | null;
+  fallbackLogoUri: string | null;
 };
 
 const SWIPE_THRESHOLD = 120;
@@ -119,6 +123,128 @@ function makeFaviconUrl(domain: string): string {
   return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=256`;
 }
 
+function extractDomainFromUrl(url: string | undefined): string | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    return u.hostname.replace(/^www\./, "");
+  } catch {
+    return null;
+  }
+}
+
+function parseGooglePlaceId(spotId: string): string | null {
+  if (spotId.startsWith("google_")) return spotId.slice("google_".length);
+  return null;
+}
+
+async function fetchGoogleLogoForSpot(args: {
+  spotId: string;
+  spotName: string;
+  spotLocation: { lat: number; lng: number };
+  signal?: AbortSignal;
+}): Promise<GoogleLogoResult> {
+  const apiKey = process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY;
+
+  if (!apiKey) {
+    console.log("[GoogleLogo] missing EXPO_PUBLIC_GOOGLE_PLACES_API_KEY");
+    return { primaryLogoUri: null, fallbackLogoUri: null };
+  }
+
+  if (Platform.OS === "web") {
+    console.log("[GoogleLogo] skipped on web (CORS likely)");
+    return { primaryLogoUri: null, fallbackLogoUri: null };
+  }
+
+  const googlePlaceId = parseGooglePlaceId(args.spotId);
+
+  const fetchDetails = async (placeId: string): Promise<GoogleLogoResult> => {
+    const detailsUrl =
+      `https://maps.googleapis.com/maps/api/place/details/json?` +
+      `place_id=${encodeURIComponent(placeId)}` +
+      `&fields=${encodeURIComponent("website,icon,url,name,rating")}` +
+      `&key=${encodeURIComponent(apiKey)}`;
+
+    const res = await fetch(detailsUrl, { signal: args.signal });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      console.log("[GoogleLogo] details error", res.status, text.slice(0, 200));
+      return { primaryLogoUri: null, fallbackLogoUri: null };
+    }
+
+    const json = (await res.json()) as {
+      result?: { website?: string; icon?: string; url?: string; name?: string; rating?: number };
+      status?: string;
+      error_message?: string;
+    };
+
+    if (json.status && json.status !== "OK") {
+      console.log("[GoogleLogo] details bad status", json.status, json.error_message);
+      return { primaryLogoUri: null, fallbackLogoUri: null };
+    }
+
+    const website = json.result?.website;
+    const domain = extractDomainFromUrl(website);
+
+    const primary = domain ? makeClearbitLogoUrl(domain) : (json.result?.icon ?? null);
+    const fallback = domain ? makeFaviconUrl(domain) : null;
+
+    console.log("[GoogleLogo] details resolved", {
+      spotId: args.spotId,
+      spotName: args.spotName,
+      domain,
+      primary,
+      fallback,
+      website,
+    });
+
+    return { primaryLogoUri: primary, fallbackLogoUri: fallback };
+  };
+
+  if (googlePlaceId) {
+    return fetchDetails(googlePlaceId);
+  }
+
+  const findUrl =
+    `https://maps.googleapis.com/maps/api/place/findplacefromtext/json?` +
+    `input=${encodeURIComponent(args.spotName)}` +
+    `&inputtype=${encodeURIComponent("textquery")}` +
+    `&fields=${encodeURIComponent("place_id")}` +
+    `&locationbias=${encodeURIComponent(
+      `circle:2500@${args.spotLocation.lat},${args.spotLocation.lng}`
+    )}` +
+    `&key=${encodeURIComponent(apiKey)}`;
+
+  const findRes = await fetch(findUrl, { signal: args.signal });
+  if (!findRes.ok) {
+    const text = await findRes.text().catch(() => "");
+    console.log("[GoogleLogo] findplace error", findRes.status, text.slice(0, 200));
+    return { primaryLogoUri: null, fallbackLogoUri: null };
+  }
+
+  const findJson = (await findRes.json()) as {
+    candidates?: { place_id?: string }[];
+    status?: string;
+    error_message?: string;
+  };
+
+  if (findJson.status && findJson.status !== "OK") {
+    console.log("[GoogleLogo] findplace bad status", findJson.status, findJson.error_message);
+    return { primaryLogoUri: null, fallbackLogoUri: null };
+  }
+
+  const placeId = findJson.candidates?.[0]?.place_id;
+  if (!placeId) {
+    console.log("[GoogleLogo] findplace no candidates", {
+      spotId: args.spotId,
+      spotName: args.spotName,
+    });
+    return { primaryLogoUri: null, fallbackLogoUri: null };
+  }
+
+  return fetchDetails(placeId);
+}
+
 function getBrandLogoCandidates(name: string): { primary: string | null; fallback: string | null } {
   const domain = guessBrandDomain(name);
   if (!domain) return { primary: null, fallback: null };
@@ -140,11 +266,6 @@ function makeFallbackLogoPlaceholder(name: string): string {
 
   const text = encodeURIComponent(initials || trimmed.slice(0, 2) || "FO");
   return `https://placehold.co/1200x900/png?text=${text}`;
-}
-
-function makeLastResortPlaceholder(name: string): string {
-  const text = encodeURIComponent(name.slice(0, 28) || "Food spot");
-  return `https://placehold.co/1400x1000/png?text=${text}`;
 }
 
 function spotFromPlace(p: Place): FoodSpot {
@@ -588,199 +709,106 @@ function EmptyState() {
 }
 
 function SpotCard({ spot, variant }: { spot: FoodSpot; variant: "active" | "next" }) {
-  const overlayOpacity = variant === "active" ? 0.38 : 0.24;
+  const spotId = spot.id;
+  const spotName = spot.name;
+  const spotLat = spot.location.lat;
+  const spotLng = spot.location.lng;
 
-  const primaryImageUri = spot.logoUrl ?? spot.photoUrl;
-  const secondaryImageUri = spot.logoFallbackUrl ?? (spot.logoUrl ? spot.photoUrl : null);
-  const isLogoPrimary = Boolean(spot.logoUrl);
-
-  return (
-    <View style={[styles.card, variant === "next" ? styles.cardNext : null]}>
-      <LinearGradient
-        colors={["rgba(0,0,0,0.02)", `rgba(0,0,0,${overlayOpacity})`]}
-        style={StyleSheet.absoluteFillObject}
-      />
-
-      <View style={styles.topInfo} pointerEvents="none" testID="spot-top-info">
-        <Text style={styles.topName} numberOfLines={1}>
-          {spot.name}
-        </Text>
-        <Text style={styles.topAddress} numberOfLines={1}>
-          {spot.address}
-        </Text>
-      </View>
-
-      <View style={styles.cardBody}>
-        <View style={styles.meta}>
-          <Text style={styles.titleLabel} numberOfLines={1}>
-            Title
-          </Text>
-          <Text style={styles.name} numberOfLines={1}>
-            {spot.name}
-          </Text>
-
-          <View style={styles.ratingRow} testID="spot-rating-row">
-            <Text style={styles.ratingStars}>
-              {"★".repeat(Math.max(0, Math.min(5, Math.round(spot.rating))))}
-            </Text>
-            <Text style={styles.ratingText}>{`${spot.rating.toFixed(1)}/5`}</Text>
-            <Text style={styles.ratingDot}>·</Text>
-            <Text style={styles.cuisine} numberOfLines={1}>
-              {spot.cuisine}
-            </Text>
-          </View>
-
-          <View style={styles.pills}>
-            <Pill text={`${priceLabel(spot.priceTier)} · ${spot.etaMins} min`} />
-            <Pill text={`${spot.distanceKm} km`} />
-            {spot.halal ? <Pill text="Halal" tone="accent" /> : null}
-          </View>
-
-          <Text style={styles.address} numberOfLines={1}>
-            {spot.address}
-          </Text>
-        </View>
-      </View>
-
-      <View style={styles.cardBg}>
-        <View style={StyleSheet.absoluteFillObject} />
-      </View>
-
-      <View style={styles.imageLayer} pointerEvents="none">
-        <View style={styles.imageOverlay} />
-      </View>
-
-      <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
-        <View style={styles.imagePlaceholder} />
-      </View>
-
-      <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
-        <LinearGradient
-          colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.46)"]}
-          style={StyleSheet.absoluteFillObject}
-        />
-      </View>
-
-      <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
-        <View style={styles.imageMask} />
-      </View>
-
-      {/* actual image */}
-      <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
-        <View style={styles.imageAbsolute}>
-          <ImageFill
-            key={spot.id}
-            primaryUri={primaryImageUri}
-            secondaryUri={secondaryImageUri}
-            fallbackUri={spot.fallbackImageUrl}
-            lastResortUri={makeLastResortPlaceholder(spot.name)}
-            contentFit={isLogoPrimary ? "contain" : "cover"}
-          />
-        </View>
-      </View>
-
-      {!isLogoPrimary && spot.logoUrl ? (
-        <View style={styles.logoBadge} pointerEvents="none">
-          <Image
-            source={{ uri: spot.logoUrl }}
-            style={styles.logoImg}
-            contentFit="contain"
-            transition={140}
-            testID="spot-logo"
-          />
-        </View>
-      ) : null}
-
-      {!primaryImageUri ? (
-        <View style={styles.noPhotoTag} pointerEvents="none" testID="spot-fallback-tag">
-          <Text style={styles.noPhotoTagText}>Logo not found — using placeholder</Text>
-        </View>
-      ) : null}
-    </View>
-  );
-}
-
-function ImageFill({
-  primaryUri,
-  secondaryUri,
-  fallbackUri,
-  lastResortUri,
-  contentFit,
-}: {
-  primaryUri: string | null;
-  secondaryUri: string | null;
-  fallbackUri: string;
-  lastResortUri: string;
-  contentFit: "cover" | "contain";
-}) {
-  const [activeUri, setActiveUri] = useState<string>(primaryUri ?? secondaryUri ?? fallbackUri);
-  const [didSecondary, setDidSecondary] = useState<boolean>(false);
-  const [didFallback, setDidFallback] = useState<boolean>(false);
-  const [didLastResort, setDidLastResort] = useState<boolean>(false);
-
-  useEffect(() => {
-    const next = primaryUri ?? secondaryUri ?? fallbackUri;
-    setActiveUri(next);
-    setDidSecondary(false);
-    setDidFallback(false);
-    setDidLastResort(false);
-  }, [fallbackUri, primaryUri, secondaryUri]);
-
-  const onError = useCallback(
-    (e: unknown) => {
-      console.log("[SpotImage] load error", {
-        activeUri,
-        primaryUri,
-        secondaryUri,
-        fallbackUri,
-        lastResortUri,
-        e,
+  const { data: googleLogo } = useQuery({
+    queryKey: [
+      "googleLogo",
+      spotId,
+      spotName,
+      Math.round(spotLat * 1000) / 1000,
+      Math.round(spotLng * 1000) / 1000,
+    ],
+    queryFn: async ({ signal }) => {
+      console.log("[SpotCard] fetching google logo", { spotId, spotName });
+      return fetchGoogleLogoForSpot({
+        spotId,
+        spotName,
+        spotLocation: { lat: spotLat, lng: spotLng },
+        signal,
       });
-
-      if (!didSecondary && secondaryUri) {
-        setDidSecondary(true);
-        setActiveUri(secondaryUri);
-        return;
-      }
-
-      if (!didFallback) {
-        setDidFallback(true);
-        setActiveUri(fallbackUri);
-        return;
-      }
-
-      if (!didLastResort) {
-        setDidLastResort(true);
-        setActiveUri(lastResortUri);
-      }
     },
-    [
-      activeUri,
-      didFallback,
-      didLastResort,
-      didSecondary,
-      fallbackUri,
-      lastResortUri,
-      primaryUri,
-      secondaryUri,
-    ]
-  );
+    enabled: Boolean(spotName) && Boolean(process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY),
+    staleTime: 1000 * 60 * 60 * 24,
+    retry: 1,
+  });
 
-  const onLoad = useCallback(() => {
-    console.log("[SpotImage] loaded", { activeUri, didSecondary, didFallback, didLastResort });
-  }, [activeUri, didFallback, didLastResort, didSecondary]);
+  const resolvedLogoUri =
+    googleLogo?.primaryLogoUri ?? spot.logoUrl ?? spot.logoFallbackUrl ?? googleLogo?.fallbackLogoUri;
+
+  const rounded = Math.max(0, Math.min(5, Math.round(spot.rating)));
+  const stars = `${"★".repeat(rounded)}${"☆".repeat(5 - rounded)}`;
 
   return (
-    <Image
-      source={{ uri: activeUri }}
-      style={StyleSheet.absoluteFillObject}
-      contentFit={contentFit}
-      transition={200}
-      cachePolicy="disk"
-      onError={onError}
-      onLoad={onLoad}
-      testID="spot-image"
-    />
+    <View style={[styles.card, variant === "next" ? styles.cardNext : null]} testID="spot-card">
+      <View style={styles.cardInner}>
+        <View style={styles.cardHeader} testID="spot-card-header">
+          <View style={styles.logoWrap} testID="spot-card-logo-wrap">
+            {resolvedLogoUri ? (
+              <Image
+                source={{ uri: resolvedLogoUri }}
+                style={styles.logo}
+                contentFit="contain"
+                transition={150}
+                testID="spot-logo"
+              />
+            ) : (
+              <View style={styles.logoFallback} testID="spot-logo-fallback">
+                <Text style={styles.logoFallbackText}>
+                  {(spot.name
+                    .split(" ")
+                    .filter(Boolean)
+                    .slice(0, 2)
+                    .map((p) => p[0])
+                    .join("")
+                    .toUpperCase() || "FO")
+                    .slice(0, 2)}
+                </Text>
+              </View>
+            )}
+          </View>
+
+          <View style={styles.headerText}>
+            <Text style={styles.name} numberOfLines={1} testID="spot-name">
+              {spot.name}
+            </Text>
+            <Text style={styles.address} numberOfLines={1} testID="spot-address">
+              {spot.address}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.ratingRow} testID="spot-rating-row">
+          <Text style={styles.ratingStars} testID="spot-rating-stars">
+            {stars}
+          </Text>
+          <Text style={styles.ratingText} testID="spot-rating-text">{`${spot.rating.toFixed(
+            1
+          )}/5`}</Text>
+        </View>
+
+        <View style={styles.pills}>
+          <Pill text={`${priceLabel(spot.priceTier)} · ${spot.etaMins} min`} />
+          <Pill text={`${spot.distanceKm} km`} />
+          {spot.halal ? <Pill text="Halal" tone="accent" /> : null}
+        </View>
+
+        <View style={styles.bigLogoStage} pointerEvents="none" testID="spot-big-logo-stage">
+          {resolvedLogoUri ? (
+            <Image
+              source={{ uri: resolvedLogoUri }}
+              style={styles.bigLogo}
+              contentFit="contain"
+              transition={150}
+              testID="spot-big-logo"
+            />
+          ) : null}
+        </View>
+      </View>
+    </View>
   );
 }
 
@@ -889,9 +917,14 @@ const styles = StyleSheet.create({
     height: 520,
     borderRadius: 26,
     overflow: "hidden",
-    backgroundColor: Colors.light.card,
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: Colors.light.border,
+    borderColor: "rgba(0,0,0,0.08)",
+  },
+  cardInner: {
+    flex: 1,
+    padding: 18,
+    backgroundColor: "#FFFFFF",
   },
   cardNext: {
     position: "absolute",
@@ -899,28 +932,56 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.98 }],
     opacity: 0.92,
   },
-  cardBody: {
+  cardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  logoWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 18,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.10)",
+    overflow: "hidden",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  logo: {
+    width: 44,
+    height: 44,
+  },
+  logoFallback: {
+    width: "100%",
+    height: "100%",
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.03)",
+  },
+  logoFallbackText: {
+    color: "#0B0B0C",
+    fontWeight: "900" as const,
+    fontSize: 16,
+    letterSpacing: 0.6,
+  },
+  headerText: {
     flex: 1,
-    justifyContent: "flex-end",
+    minWidth: 0,
   },
-  imageAbsolute: {
+  bigLogoStage: {
     flex: 1,
+    marginTop: 18,
+    borderRadius: 22,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.06)",
+    justifyContent: "center",
+    alignItems: "center",
   },
-  imageLayer: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  imageOverlay: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  imagePlaceholder: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "#F0F1F4",
-  },
-  imageMask: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  cardBg: {
-    ...StyleSheet.absoluteFillObject,
+  bigLogo: {
+    width: "76%",
+    height: "76%",
   },
   stamp: {
     position: "absolute",
@@ -945,140 +1006,61 @@ const styles = StyleSheet.create({
     color: "#0B0B0C",
     letterSpacing: 1.2,
   },
-  logoBadge: {
-    position: "absolute",
-    top: 18,
-    right: 18,
-    width: 54,
-    height: 54,
-    borderRadius: 16,
-    backgroundColor: "rgba(255,255,255,0.88)",
-    borderWidth: 1,
-    borderColor: "rgba(0,0,0,0.10)",
-    overflow: "hidden",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  logoImg: {
-    width: 44,
-    height: 44,
-  },
-  topInfo: {
-    position: "absolute",
-    top: 14,
-    left: 14,
-    right: 78,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 16,
-    backgroundColor: "rgba(0,0,0,0.40)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.14)",
-  },
-  topName: {
-    color: "#FFFFFF",
-    fontWeight: "900" as const,
-    fontSize: 16,
-    letterSpacing: -0.2,
-  },
-  topAddress: {
-    marginTop: 2,
-    color: "rgba(255,255,255,0.90)",
-    fontWeight: "700" as const,
-    fontSize: 12,
-  },
-  noPhotoTag: {
-    position: "absolute",
-    bottom: 16,
-    right: 16,
-    backgroundColor: "rgba(0,0,0,0.45)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.18)",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-  },
-  noPhotoTagText: {
-    color: "rgba(255,255,255,0.92)",
-    fontSize: 11,
-    fontWeight: "700" as const,
-  },
-  meta: {
-    padding: 18,
-  },
-  titleLabel: {
-    color: "rgba(255,255,255,0.82)",
-    fontSize: 12,
-    fontWeight: "800" as const,
-    letterSpacing: 0.8,
-    textTransform: "uppercase" as const,
-  },
   name: {
-    color: "#FFFFFF",
+    color: "#0B0B0C",
     fontWeight: "900" as const,
-    fontSize: 26,
-    letterSpacing: -0.7,
-    marginTop: 4,
+    fontSize: 20,
+    letterSpacing: -0.2,
   },
   ratingRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 8,
-    flexWrap: "wrap",
-    gap: 6,
+    gap: 10,
+    marginTop: 12,
   },
   ratingStars: {
-    color: "#FFD27D",
+    color: "#0B0B0C",
     fontWeight: "900" as const,
-    fontSize: 13,
-    letterSpacing: 0.4,
+    fontSize: 14,
+    letterSpacing: 1.2,
   },
   ratingText: {
-    color: "rgba(255,255,255,0.92)",
+    color: "rgba(0,0,0,0.70)",
     fontWeight: "800" as const,
     fontSize: 13,
-  },
-  ratingDot: {
-    color: "rgba(255,255,255,0.70)",
-    fontWeight: "900" as const,
-  },
-  cuisine: {
-    color: "rgba(255,255,255,0.92)",
-    fontSize: 13,
-    fontWeight: "600" as const,
-    flexShrink: 1,
   },
   pills: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
-    marginTop: 10,
+    marginTop: 12,
   },
   pill: {
-    backgroundColor: "rgba(255,255,255,0.18)",
+    backgroundColor: "rgba(0,0,0,0.04)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.22)",
+    borderColor: "rgba(0,0,0,0.06)",
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 999,
     maxWidth: 220,
   },
   pillAccent: {
-    backgroundColor: "rgba(255,77,46,0.22)",
-    borderColor: "rgba(255,77,46,0.26)",
+    backgroundColor: "rgba(255,77,46,0.10)",
+    borderColor: "rgba(255,77,46,0.18)",
   },
   pillText: {
-    color: "rgba(255,255,255,0.95)",
+    color: "rgba(0,0,0,0.82)",
     fontWeight: "700" as const,
     fontSize: 12,
   },
   pillTextAccent: {
-    color: "#FFE6E1",
+    color: "#B62814",
   },
   address: {
-    color: "rgba(255,255,255,0.84)",
-    marginTop: 12,
+    color: "rgba(0,0,0,0.60)",
+    marginTop: 2,
     fontSize: 12,
+    fontWeight: "600" as const,
   },
   actions: {
     flexDirection: "row",
