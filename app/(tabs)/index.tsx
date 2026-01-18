@@ -46,6 +46,10 @@ type GoogleLogoResult = {
   fallbackLogoUri: string | null;
 };
 
+type GooglePhotoResult = {
+  photoUri: string | null;
+};
+
 const SWIPE_THRESHOLD = 120;
 
 function openDirections(lat: number, lng: number, label: string) {
@@ -138,6 +142,13 @@ function extractDomainFromUrl(url: string | undefined): string | null {
 function parseGooglePlaceId(spotId: string): string | null {
   if (spotId.startsWith("google_")) return spotId.slice("google_".length);
   return null;
+}
+
+function makeGooglePlacePhotoUrl(photoRef: string | undefined, apiKey: string): string | null {
+  if (!photoRef) return null;
+  return `https://maps.googleapis.com/maps/api/place/photo?maxwidth=1600&photoreference=${encodeURIComponent(
+    photoRef
+  )}&key=${encodeURIComponent(apiKey)}`;
 }
 
 async function fetchGoogleLogoForSpot(args: {
@@ -242,6 +253,107 @@ async function fetchGoogleLogoForSpot(args: {
       spotName: args.spotName,
     });
     return { primaryLogoUri: null, fallbackLogoUri: null };
+  }
+
+  return fetchDetails(placeId);
+}
+
+async function fetchGooglePhotoForSpot(args: {
+  spotId: string;
+  spotName: string;
+  spotLocation: { lat: number; lng: number };
+  signal?: AbortSignal;
+}): Promise<GooglePhotoResult> {
+  const apiKey = process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY;
+
+  if (!apiKey) {
+    console.log("[GooglePhoto] missing EXPO_PUBLIC_GOOGLE_PLACES_API_KEY");
+    return { photoUri: null };
+  }
+
+  if (Platform.OS === "web") {
+    console.log("[GooglePhoto] skipped on web (CORS likely)");
+    return { photoUri: null };
+  }
+
+  const googlePlaceId = parseGooglePlaceId(args.spotId);
+
+  const fetchDetails = async (placeId: string): Promise<GooglePhotoResult> => {
+    const detailsUrl =
+      `https://maps.googleapis.com/maps/api/place/details/json?` +
+      `place_id=${encodeURIComponent(placeId)}` +
+      `&fields=${encodeURIComponent("photos")}` +
+      `&key=${encodeURIComponent(apiKey)}`;
+
+    const res = await fetch(detailsUrl, { signal: args.signal });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      console.log("[GooglePhoto] details error", res.status, text.slice(0, 200));
+      return { photoUri: null };
+    }
+
+    const json = (await res.json()) as {
+      result?: { photos?: { photo_reference?: string }[] };
+      status?: string;
+      error_message?: string;
+    };
+
+    if (json.status && json.status !== "OK") {
+      console.log("[GooglePhoto] details bad status", json.status, json.error_message);
+      return { photoUri: null };
+    }
+
+    const ref = json.result?.photos?.[0]?.photo_reference;
+    const photoUri = makeGooglePlacePhotoUrl(ref, apiKey);
+
+    console.log("[GooglePhoto] details resolved", {
+      spotId: args.spotId,
+      spotName: args.spotName,
+      hasPhoto: Boolean(photoUri),
+    });
+
+    return { photoUri };
+  };
+
+  if (googlePlaceId) {
+    return fetchDetails(googlePlaceId);
+  }
+
+  const findUrl =
+    `https://maps.googleapis.com/maps/api/place/findplacefromtext/json?` +
+    `input=${encodeURIComponent(args.spotName)}` +
+    `&inputtype=${encodeURIComponent("textquery")}` +
+    `&fields=${encodeURIComponent("place_id")}` +
+    `&locationbias=${encodeURIComponent(
+      `circle:2500@${args.spotLocation.lat},${args.spotLocation.lng}`
+    )}` +
+    `&key=${encodeURIComponent(apiKey)}`;
+
+  const findRes = await fetch(findUrl, { signal: args.signal });
+  if (!findRes.ok) {
+    const text = await findRes.text().catch(() => "");
+    console.log("[GooglePhoto] findplace error", findRes.status, text.slice(0, 200));
+    return { photoUri: null };
+  }
+
+  const findJson = (await findRes.json()) as {
+    candidates?: { place_id?: string }[];
+    status?: string;
+    error_message?: string;
+  };
+
+  if (findJson.status && findJson.status !== "OK") {
+    console.log("[GooglePhoto] findplace bad status", findJson.status, findJson.error_message);
+    return { photoUri: null };
+  }
+
+  const placeId = findJson.candidates?.[0]?.place_id;
+  if (!placeId) {
+    console.log("[GooglePhoto] findplace no candidates", {
+      spotId: args.spotId,
+      spotName: args.spotName,
+    });
+    return { photoUri: null };
   }
 
   return fetchDetails(placeId);
@@ -734,6 +846,28 @@ function SpotCard({ spot, variant }: { spot: FoodSpot; variant: "active" | "next
     retry: 1,
   });
 
+  const { data: googlePhoto } = useQuery({
+    queryKey: [
+      "googlePhoto",
+      spotId,
+      spotName,
+      Math.round(spotLat * 1000) / 1000,
+      Math.round(spotLng * 1000) / 1000,
+    ],
+    queryFn: async ({ signal }) => {
+      console.log("[SpotCard] fetching google photo", { spotId, spotName });
+      return fetchGooglePhotoForSpot({
+        spotId,
+        spotName,
+        spotLocation: { lat: spotLat, lng: spotLng },
+        signal,
+      });
+    },
+    enabled: Boolean(spotName) && Boolean(process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY),
+    staleTime: 1000 * 60 * 60 * 24,
+    retry: 1,
+  });
+
   const resolvedLogoUri =
     googleLogo?.primaryLogoUri ??
     spot.logoUrl ??
@@ -741,14 +875,28 @@ function SpotCard({ spot, variant }: { spot: FoodSpot; variant: "active" | "next
     spot.logoFallbackUrl ??
     null;
 
+  const resolvedPhotoUri = googlePhoto?.photoUri ?? spot.photoUrl ?? null;
+
   const cuisineLabel = useMemo(() => {
     const raw = spot.cuisine ?? "";
     return raw.split("·")[0]?.trim() || "Restaurant";
   }, [spot.cuisine]);
 
+  const budgetLabel = useMemo(() => {
+    const tier = Math.max(1, Math.min(4, spot.priceTier));
+    return "$".repeat(tier);
+  }, [spot.priceTier]);
+
+  const etaLabel = useMemo(() => `${spot.etaMins} min`, [spot.etaMins]);
+
+  const distanceLabel = useMemo(() => {
+    const km = Number.isFinite(spot.distanceKm) ? spot.distanceKm : 0;
+    return `${km.toFixed(2)} km`;
+  }, [spot.distanceKm]);
+
   return (
     <View style={[styles.card, variant === "next" ? styles.cardNext : null]} testID="spot-card">
-      <View style={styles.cardInner}>
+      <View style={styles.cardInner} testID="spot-card-inner">
         <View style={styles.cardHeader} testID="spot-card-header">
           <View style={styles.logoWrap} testID="spot-card-logo-wrap">
             {resolvedLogoUri ? (
@@ -788,11 +936,49 @@ function SpotCard({ spot, variant }: { spot: FoodSpot; variant: "active" | "next
         <View style={styles.divider} testID="spot-divider" />
 
         <View style={styles.ratingRow} testID="spot-rating-row">
-          <StarRating rating={spot.rating} size={24} testID="spot-stars" />
-          <Text style={styles.ratingNumber} testID="spot-rating-number">
-            {spot.rating.toFixed(1)}
-          </Text>
+          <View style={styles.ratingLeft} testID="spot-rating-left">
+            <StarRating rating={spot.rating} size={22} testID="spot-stars" />
+            <Text style={styles.ratingInline} testID="spot-rating-inline">
+              {spot.rating.toFixed(1)}/5
+            </Text>
+          </View>
         </View>
+
+        <View style={styles.pillsRow} testID="spot-pills-row">
+          <View style={[styles.pill, styles.pillAccent]} testID="spot-pill-budget">
+            <Text style={[styles.pillText, styles.pillTextAccent]}>{budgetLabel}</Text>
+          </View>
+          <View style={styles.pill} testID="spot-pill-eta">
+            <Text style={styles.pillText}>{etaLabel}</Text>
+          </View>
+          <View style={styles.pill} testID="spot-pill-distance">
+            <Text style={styles.pillText}>{distanceLabel}</Text>
+          </View>
+        </View>
+
+        <View style={styles.photoBox} testID="spot-photo-box">
+          {resolvedPhotoUri ? (
+            <Image
+              source={{ uri: resolvedPhotoUri }}
+              style={styles.photo}
+              contentFit="cover"
+              transition={200}
+              testID="spot-photo"
+            />
+          ) : (
+            <Image
+              source={{ uri: spot.fallbackImageUrl }}
+              style={styles.photo}
+              contentFit="cover"
+              transition={200}
+              testID="spot-photo-fallback"
+            />
+          )}
+        </View>
+
+        <Text style={styles.address} numberOfLines={1} testID="spot-address">
+          {spot.address}
+        </Text>
       </View>
     </View>
   );
@@ -933,7 +1119,7 @@ const styles = StyleSheet.create({
   },
   card: {
     width: "100%",
-    height: 260,
+    height: 540,
     borderRadius: 28,
     overflow: "hidden",
     backgroundColor: "#FFFFFF",
@@ -1018,6 +1204,27 @@ const styles = StyleSheet.create({
     color: "rgba(0,0,0,0.45)",
     letterSpacing: -0.2,
   },
+  pillsRow: {
+    marginTop: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    flexWrap: "wrap",
+  },
+  photoBox: {
+    marginTop: 16,
+    width: "100%",
+    borderRadius: 22,
+    overflow: "hidden",
+    backgroundColor: "rgba(0,0,0,0.04)",
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    height: 260,
+  },
+  photo: {
+    width: "100%",
+    height: "100%",
+  },
   stamp: {
     position: "absolute",
     top: 26,
@@ -1051,7 +1258,17 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginTop: 18,
+    marginTop: 16,
+  },
+  ratingLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  ratingInline: {
+    color: "rgba(0,0,0,0.52)",
+    fontWeight: "800" as const,
+    fontSize: 16,
   },
   pill: {
     backgroundColor: "rgba(0,0,0,0.04)",
