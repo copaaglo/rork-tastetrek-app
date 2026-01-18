@@ -33,8 +33,8 @@ export type FoodSpot = {
   etaMins: number;
   distanceKm: number;
   photoUrl: string | null;
-  fallbackPhotoUrl: string;
   logoUrl: string | null;
+  fallbackImageUrl: string;
   address: string;
   location: { lat: number; lng: number };
 };
@@ -116,29 +116,18 @@ function getBrandLogoUrl(name: string): string | null {
   return `https://logo.clearbit.com/${encodeURIComponent(domain)}?size=256`;
 }
 
-const CURATED_FOOD_IMAGES: string[] = [
-  "https://images.unsplash.com/photo-1550547660-d9450f859349?auto=format&fit=crop&w=1400&q=80", // burger
-  "https://images.unsplash.com/photo-1561758033-d89a9ad46330?auto=format&fit=crop&w=1400&q=80", // fries
-  "https://images.unsplash.com/photo-1521305916504-4a1121188589?auto=format&fit=crop&w=1400&q=80", // tacos
-  "https://images.unsplash.com/photo-1604908812507-6e1b76a400fd?auto=format&fit=crop&w=1400&q=80", // pizza
-  "https://images.unsplash.com/photo-1499636136210-6f4ee915583e?auto=format&fit=crop&w=1400&q=80", // coffee
-  "https://images.unsplash.com/photo-1606755962773-d324e0a13086?auto=format&fit=crop&w=1400&q=80", // fried chicken
-  "https://images.unsplash.com/photo-1551782450-a2132b4ba21d?auto=format&fit=crop&w=1400&q=80", // burger alt
-  "https://images.unsplash.com/photo-1555992336-03a23c8e0f63?auto=format&fit=crop&w=1400&q=80", // sandwich
-];
+function makeFallbackLogoPlaceholder(name: string): string {
+  const trimmed = name.trim();
+  const initials = trimmed
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0])
+    .join("")
+    .toUpperCase();
 
-function hashStringToInt(input: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < input.length; i++) {
-    h ^= input.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return Math.abs(h);
-}
-
-function pickDeterministicFallbackImage(seed: string): string {
-  const idx = hashStringToInt(seed) % CURATED_FOOD_IMAGES.length;
-  return CURATED_FOOD_IMAGES[idx] ?? CURATED_FOOD_IMAGES[0]!;
+  const text = encodeURIComponent(initials || trimmed.slice(0, 2) || "FO");
+  return `https://placehold.co/1200x900/png?text=${text}`;
 }
 
 function makeLastResortPlaceholder(name: string): string {
@@ -153,8 +142,8 @@ function spotFromPlace(p: Place): FoodSpot {
   const address = p.address;
 
   const photoUrl = p.photoUrl ?? null;
-  const fallbackPhotoUrl = pickDeterministicFallbackImage(`${p.id}|${p.name}|${cuisine}`);
-  const logoUrl = photoUrl ? null : getBrandLogoUrl(p.name);
+  const logoUrl = getBrandLogoUrl(p.name);
+  const fallbackImageUrl = makeFallbackLogoPlaceholder(p.name);
 
   const etaMins = Math.max(6, Math.round(p.distanceKm * 7));
 
@@ -168,8 +157,8 @@ function spotFromPlace(p: Place): FoodSpot {
     etaMins,
     distanceKm: p.distanceKm,
     photoUrl,
-    fallbackPhotoUrl,
     logoUrl,
+    fallbackImageUrl,
     address,
     location: p.location,
   };
@@ -585,6 +574,8 @@ function EmptyState() {
 
 function SpotCard({ spot, variant }: { spot: FoodSpot; variant: "active" | "next" }) {
   const overlayOpacity = variant === "active" ? 0.38 : 0.24;
+  const primaryImageUri = spot.logoUrl ?? spot.photoUrl;
+  const isLogoPrimary = Boolean(spot.logoUrl);
 
   return (
     <View style={[styles.card, variant === "next" ? styles.cardNext : null]}>
@@ -604,16 +595,27 @@ function SpotCard({ spot, variant }: { spot: FoodSpot; variant: "active" | "next
 
       <View style={styles.cardBody}>
         <View style={styles.meta}>
+          <Text style={styles.titleLabel} numberOfLines={1}>
+            Title
+          </Text>
           <Text style={styles.name} numberOfLines={1}>
             {spot.name}
           </Text>
-          <Text style={styles.cuisine} numberOfLines={1}>
-            {spot.cuisine}
-          </Text>
+
+          <View style={styles.ratingRow} testID="spot-rating-row">
+            <Text style={styles.ratingStars}>
+              {"★".repeat(Math.max(0, Math.min(5, Math.round(spot.rating))))}
+            </Text>
+            <Text style={styles.ratingText}>{spot.rating.toFixed(1)}</Text>
+            <Text style={styles.ratingDot}>·</Text>
+            <Text style={styles.cuisine} numberOfLines={1}>
+              {spot.cuisine}
+            </Text>
+          </View>
 
           <View style={styles.pills}>
             <Pill text={`${priceLabel(spot.priceTier)} · ${spot.etaMins} min`} />
-            <Pill text={`${spot.rating.toFixed(1)}★ · ${spot.distanceKm} km`} />
+            <Pill text={`${spot.distanceKm} km`} />
             {spot.halal ? <Pill text="Halal" tone="accent" /> : null}
           </View>
 
@@ -651,14 +653,15 @@ function SpotCard({ spot, variant }: { spot: FoodSpot; variant: "active" | "next
         <View style={styles.imageAbsolute}>
           <ImageFill
             key={spot.id}
-            primaryUri={spot.photoUrl}
-            fallbackUri={spot.fallbackPhotoUrl}
+            primaryUri={primaryImageUri}
+            fallbackUri={spot.fallbackImageUrl}
             lastResortUri={makeLastResortPlaceholder(spot.name)}
+            contentFit={isLogoPrimary ? "contain" : "cover"}
           />
         </View>
       </View>
 
-      {spot.logoUrl ? (
+      {!isLogoPrimary && spot.logoUrl ? (
         <View style={styles.logoBadge} pointerEvents="none">
           <Image
             source={{ uri: spot.logoUrl }}
@@ -670,9 +673,9 @@ function SpotCard({ spot, variant }: { spot: FoodSpot; variant: "active" | "next
         </View>
       ) : null}
 
-      {!spot.photoUrl ? (
+      {!primaryImageUri ? (
         <View style={styles.noPhotoTag} pointerEvents="none" testID="spot-fallback-tag">
-          <Text style={styles.noPhotoTagText}>Brand / placeholder photo</Text>
+          <Text style={styles.noPhotoTagText}>Logo not found — using placeholder</Text>
         </View>
       ) : null}
     </View>
@@ -683,10 +686,12 @@ function ImageFill({
   primaryUri,
   fallbackUri,
   lastResortUri,
+  contentFit,
 }: {
   primaryUri: string | null;
   fallbackUri: string;
   lastResortUri: string;
+  contentFit: "cover" | "contain";
 }) {
   const [activeUri, setActiveUri] = useState<string>(primaryUri ?? fallbackUri);
   const [didFallback, setDidFallback] = useState<boolean>(false);
@@ -731,7 +736,7 @@ function ImageFill({
     <Image
       source={{ uri: activeUri }}
       style={StyleSheet.absoluteFillObject}
-      contentFit="cover"
+      contentFit={contentFit}
       transition={200}
       cachePolicy="disk"
       onError={onError}
@@ -871,7 +876,7 @@ const styles = StyleSheet.create({
   },
   imagePlaceholder: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "#E9EAEE",
+    backgroundColor: "#F0F1F4",
   },
   imageMask: {
     ...StyleSheet.absoluteFillObject,
@@ -963,17 +968,47 @@ const styles = StyleSheet.create({
   meta: {
     padding: 18,
   },
+  titleLabel: {
+    color: "rgba(255,255,255,0.82)",
+    fontSize: 12,
+    fontWeight: "800" as const,
+    letterSpacing: 0.8,
+    textTransform: "uppercase" as const,
+  },
   name: {
     color: "#FFFFFF",
     fontWeight: "900" as const,
     fontSize: 26,
     letterSpacing: -0.7,
+    marginTop: 4,
+  },
+  ratingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 8,
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  ratingStars: {
+    color: "#FFD27D",
+    fontWeight: "900" as const,
+    fontSize: 13,
+    letterSpacing: 0.4,
+  },
+  ratingText: {
+    color: "rgba(255,255,255,0.92)",
+    fontWeight: "800" as const,
+    fontSize: 13,
+  },
+  ratingDot: {
+    color: "rgba(255,255,255,0.70)",
+    fontWeight: "900" as const,
   },
   cuisine: {
     color: "rgba(255,255,255,0.92)",
-    marginTop: 4,
     fontSize: 13,
     fontWeight: "600" as const,
+    flexShrink: 1,
   },
   pills: {
     flexDirection: "row",
